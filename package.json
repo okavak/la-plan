@@ -5,9 +5,12 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "test:contract": "node --test tests/rpc.integration.mjs",
-    "test:remote": "LA_TARGET=remote node --test tests/rpc.integration.mjs"
+    "test:remote": "LA_TARGET=remote node --test tests/rpc.integration.mjs",
+    "test:e2e": "node --test tests/two-people.e2e.mjs",
+    "test:e2e:live": "LA_TARGET=remote node --test tests/two-people.e2e.mjs"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10"
+    "@electric-sql/pglite": "^0.5.10",
+    "playwright": "^1.64.1"
   }
 }
