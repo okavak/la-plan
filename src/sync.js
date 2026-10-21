@@ -53,7 +53,7 @@ export function createSync({
   let state = {
     status: secret ? 'connecting' : 'local',
     meta: {}, answers: {}, info: {}, comments: [], plan: null,
-    lastSyncAt: null, pendingCount: 0, error: null,
+    lastSyncAt: null, pendingCount: 0, pendingIds: [], rejected: {}, error: null,
   };
 
   function notify() {
@@ -65,7 +65,7 @@ export function createSync({
     state = { ...state, ...patch };
     notify();
   }
-  const pendingCount = () => Object.keys(pending).length;
+  const pendingInfo = () => ({ pendingCount: Object.keys(pending).length, pendingIds: Object.keys(pending) });
   const persistPending = () => writeJson(storage, PENDING_KEY, pending);
   const persistCache = () => writeJson(storage, CACHE_KEY, {
     answers: state.answers, info: state.info, meta: state.meta, comments: state.comments, plan: state.plan,
@@ -87,7 +87,7 @@ export function createSync({
     }
     update({
       answers, info: cache.info ?? {}, meta: cache.meta ?? {}, comments: cache.comments ?? [],
-      plan: cache.plan ?? null, pendingCount: pendingCount(),
+      plan: cache.plan ?? null, ...pendingInfo(),
     });
     if (!secret) return;
     flush();
@@ -170,7 +170,9 @@ export function createSync({
       return;
     }
     pending[qid] = { v, by: by ?? null, seq: ++seq };
-    update({ answers, info, pendingCount: pendingCount(), error: null });
+    const rejected = { ...state.rejected };
+    delete rejected[qid];
+    update({ answers, info, rejected, ...pendingInfo(), error: null });
     persistPending();
     persistCache();
     send(qid);
@@ -194,7 +196,7 @@ export function createSync({
       const info = { ...state.info };
       if (current && !isEmptyValue(p.v)) info[qid] = { by: p.by, at };
       persistPending();
-      update({ info, pendingCount: pendingCount(), status: state.status === 'offline' ? 'live' : state.status });
+      update({ info, ...pendingInfo(), status: state.status === 'offline' ? 'live' : state.status });
       persistCache();
     } catch (e) {
       if (e?.code === 'network' || e?.code === 'server') {
@@ -202,15 +204,32 @@ export function createSync({
         update({ status: 'offline' });
         scheduleRetry();
       } else {
-        if (pending[qid] && pending[qid].seq === p.seq) delete pending[qid];
+        const message = errorText(e);
+        const rejected = { ...state.rejected };
+        if (pending[qid] && pending[qid].seq === p.seq) {
+          delete pending[qid];
+          rejected[qid] = message; // only for the value that was refused, not for a newer one
+        }
         persistPending();
-        update({ error: errorText(e), pendingCount: pendingCount() });
+        update({ error: message, rejected, ...pendingInfo() });
       }
     } finally {
       inflight.delete(qid);
     }
     // a newer value for this question arrived while the write was in flight
     if (!offline && pending[qid]) send(qid);
+  }
+
+  /** The network may be back (online event, tab visible again): retry now instead of waiting out the backoff. */
+  function kick() {
+    if (!secret || state.status === 'invalid') return;
+    if (retryTimer != null) {
+      timers.clear(retryTimer);
+      retryTimer = null;
+    }
+    backoff = BACKOFF_START;
+    flush();
+    refresh();
   }
 
   function scheduleRetry() {
@@ -237,7 +256,7 @@ export function createSync({
   }
 
   return {
-    start, stop, refresh, setAnswer, addComment, removeComment,
+    start, stop, refresh, kick, setAnswer, addComment, removeComment,
     getState: () => state,
     subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn); },
   };

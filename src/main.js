@@ -6,6 +6,7 @@ import { createApi } from './api.js';
 import { createSync } from './sync.js';
 import { renderSections, renderJump, renderCredits, renderSummaryItems, esc } from './render.js';
 import { ensureName, askNameDialog, mountThreads, paintMeta, NAME_KEY } from './comments.js';
+import { createDrafts, fieldLabel } from './drafts.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const $ = (id) => document.getElementById(id);
@@ -52,7 +53,13 @@ async function main() {
   // keeps editing the previous plan while the address bar shows a different one.
   window.addEventListener('hashchange', () => {
     const next = parseKey(location.hash);
-    if (next && next !== secret) location.reload();
+    if (next && next !== secret) {
+      location.reload();
+      return;
+    }
+    // In-page links (#ozet, the section chips) replace the hash; put the key back so that copying or
+    // bookmarking the address bar still gives the whole plan link.
+    if (!next && secret) history.replaceState(null, '', `${location.pathname}${location.search}#k=${secret}`);
   });
 
   const threads = mountThreads({ root, notes: $('notlar'), sync, storage: localStorage, askName: askNameDialog });
@@ -89,10 +96,34 @@ async function main() {
         if (input) input.checked = on;
       }
     }
+  }
+
+  // ---- free-text answers: what the person typed stays in the box until the server has accepted it ----
+  const drafts = createDrafts();
+  const typingTimers = {}; // key -> timeout: keystrokes not yet handed to the sync engine
+  const committed = new Set(); // keys whose draft was handed over and awaits the server
+  const sent = {}; // key -> last value handed over (avoids sending the same text twice)
+  const blocked = {}; // key -> why the last save did not start
+
+  function paintTexts(state) {
     for (const el of textEls) {
-      if (document.activeElement === el) continue;
-      const v = answers[el.dataset.text];
-      el.value = v == null ? '' : v;
+      const k = el.dataset.text;
+      // A draft is retired once the server accepted it: nothing pending and nothing rejected.
+      if (committed.has(k) && typingTimers[k] == null && !state.pendingIds.includes(k) && !state.rejected[k]) {
+        drafts.clear(k);
+        committed.delete(k);
+      }
+      const shown = drafts.shown(k, state.answers);
+      if (el.value !== shown && document.activeElement !== el) el.value = shown;
+      const note = root.querySelector(`[data-saved="${k}"]`);
+      if (note) {
+        note.textContent = blocked[k] || fieldLabel({
+          typing: typingTimers[k] != null,
+          pending: state.pendingIds.includes(k),
+          rejected: state.rejected[k],
+          saved: !drafts.has(k) && (state.answers[k] ?? '') !== '',
+        });
+      }
     }
   }
 
@@ -133,6 +164,7 @@ async function main() {
   function paint(state) {
     paintChrome(state);
     paintOptions(state.answers);
+    paintTexts(state);
     paintSummary(state.answers);
     paintMeta(root, state);
     threads.render(state);
@@ -146,14 +178,16 @@ async function main() {
   }
 
   // The new value is computed after the name is known, from the then-current state.
+  // Resolves to 'ok' when the value was handed to the sync engine, else why it was not.
   async function choose(qid, valueFn) {
-    if (sync.getState().status === 'invalid') return; // the banner already explains the link problem
+    if (sync.getState().status === 'invalid') return 'invalid'; // the banner already explains the link problem
     let by = '';
     if (secret) {
       by = await getName();
-      if (!by) return; // dialog dismissed: nothing changes
+      if (!by) return 'name'; // dialog dismissed: nothing changes
     }
     sync.setAnswer(qid, valueFn(), by);
+    return 'ok';
   }
 
   root.addEventListener('click', (e) => {
@@ -177,22 +211,47 @@ async function main() {
     choose(q.id, () => toggleValue(q.type, sync.getState().answers[q.id], wrap.dataset.o));
   });
 
-  const typing = {};
+  async function commit(k) {
+    if (typingTimers[k] != null) {
+      clearTimeout(typingTimers[k]);
+      delete typingTimers[k];
+    }
+    if (!drafts.has(k)) return;
+    const text = drafts.get(k);
+    if (committed.has(k) && sent[k] === text) return; // blur right after the pause: already on its way
+    const result = await choose(k, () => drafts.get(k));
+    if (result === 'ok') {
+      committed.add(k);
+      sent[k] = text;
+      delete blocked[k];
+    } else {
+      blocked[k] = result === 'name' ? 'Kaydedilmedi: önce adınızı yazın' : 'Kaydedilmedi: bağlantı geçersiz';
+    }
+    paintTexts(sync.getState());
+  }
+
   root.addEventListener('input', (e) => {
     const el = e.target.closest('[data-text]');
     if (!el) return;
     const k = el.dataset.text;
-    const note = root.querySelector(`[data-saved="${k}"]`);
-    if (note) note.textContent = 'Yazılıyor…';
-    clearTimeout(typing[k]);
-    typing[k] = setTimeout(async () => {
-      await choose(k, () => el.value);
-      if (note) note.textContent = 'Kaydedildi';
-    }, 800);
+    drafts.set(k, el.value);
+    committed.delete(k);
+    delete blocked[k];
+    clearTimeout(typingTimers[k]);
+    typingTimers[k] = setTimeout(() => commit(k), 800);
+    paintTexts(sync.getState());
   });
 
+  // Leaving the field saves at once instead of waiting out the typing pause.
+  root.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-text]');
+    if (el) commit(el.dataset.text);
+  });
+
+  // The network may be back (or the tab visible again): retry now instead of waiting out the backoff.
+  window.addEventListener('online', () => sync.kick());
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) sync.refresh();
+    if (!document.hidden) sync.kick();
   });
 
   sync.subscribe(paint);

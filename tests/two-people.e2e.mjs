@@ -284,3 +284,93 @@ test('pasting another plan\'s link into the same tab switches plans', opts, asyn
     await a.close();
   }
 });
+
+test('text typed right before tapping a card is not lost', opts, async () => {
+  const p = await newPlan('E2E draft');
+  const a = await person();
+  const b = await person();
+  try {
+    const pageA = await openLive(a.ctx, p.url);
+    const pageB = await openLive(b.ctx, p.url);
+    await tap(pageA, 'disney', 'two', { name: 'Ali' });
+    // Type, move focus away and tap a card, all inside the 800 ms typing pause (one synchronous step, so the
+    // timing does not depend on how fast the test runner is).
+    await pageA.evaluate(() => {
+      const field = document.querySelector('[data-text="allergy"]');
+      field.focus();
+      field.value = 'fındık';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.blur();
+      document.querySelector('.opt-wrap[data-q="daytrip"][data-o="catalina"] label.opt').click();
+    });
+    await isOn(pageA, 'daytrip', 'catalina', 2_000);
+    await pageA.waitForTimeout(1_500);
+    assert.equal(await pageA.locator('[data-text="allergy"]').inputValue(), 'fındık');
+    await pageB.waitForFunction(() => document.querySelector('[data-text="allergy"]').value === 'fındık', null, { timeout: POLL_WAIT });
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});
+
+test('text typed before the name is known survives polls while the name dialog is open', opts, async () => {
+  const p = await newPlan('E2E draft name');
+  const a = await person();
+  const b = await person();
+  try {
+    const pageA = await openLive(a.ctx, p.url);
+    const pageB = await openLive(b.ctx, p.url);
+    await pageA.locator('[data-text="allergy"]').fill('fındık');
+    await pageA.locator('dialog.name input').waitFor({ timeout: 5_000 }); // opens after the typing pause
+    // Opening the dialog moves focus out of the field, which saves it at once; that must not ask for the name again.
+    assert.equal(await pageA.locator('dialog.name').count(), 1);
+    await pageA.waitForTimeout(6_500); // a poll runs behind the dialog
+    await giveName(pageA, 'Ali');
+    assert.equal(await pageA.locator('[data-text="allergy"]').inputValue(), 'fındık');
+    await pageB.waitForFunction(() => document.querySelector('[data-text="allergy"]').value === 'fındık', null, { timeout: POLL_WAIT });
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});
+
+test('a note too long for the server stays in the box and shows an error', opts, async () => {
+  const p = await newPlan('E2E long note');
+  const a = await person();
+  try {
+    const page = await openLive(a.ctx, p.url);
+    await tap(page, 'disney', 'two', { name: 'Ali' });
+    const note = page.locator('textarea[data-text]');
+    const label = page.locator('textarea[data-text] + .saved');
+    await note.evaluate((el) => el.removeAttribute('maxlength')); // get past the browser limit to reach the server's
+    await note.fill('x'.repeat(4500));
+    await note.blur();
+    await page.waitForFunction(() => document.querySelector('textarea[data-text] + .saved').textContent.startsWith('Kaydedilemedi'), null, { timeout: 8_000 });
+    await page.waitForTimeout(6_500); // a poll must not blank the box
+    assert.equal((await note.inputValue()).length, 4500);
+    assert.match(await label.textContent(), /Kaydedilemedi: Metin çok uzun/);
+    await note.fill('kısa not');
+    await note.blur();
+    await page.waitForFunction(() => document.querySelector('textarea[data-text] + .saved').textContent === 'Kaydedildi', null, { timeout: 8_000 });
+    assert.equal(await note.inputValue(), 'kısa not');
+  } finally {
+    await a.close();
+  }
+});
+
+test('in-page navigation keeps the plan key in the address bar', opts, async () => {
+  const p = await newPlan('E2E address bar');
+  const a = await person();
+  try {
+    const page = await openLive(a.ctx, p.url);
+    await page.click('#jump a');
+    await page.waitForTimeout(400);
+    assert.equal(new URL(page.url()).hash, `#k=${p.secret}`);
+    await page.click('a[href="#ozet"]');
+    await page.waitForTimeout(400);
+    assert.equal(new URL(page.url()).hash, `#k=${p.secret}`);
+    assert.equal(await status(page), 'live', 'no reload and no state change');
+  } finally {
+    await a.close();
+  }
+});

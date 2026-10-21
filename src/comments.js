@@ -64,31 +64,42 @@ export async function submitFromTextarea({ textarea, sync, scope, author }) {
 
 // ---------- DOM wiring ----------
 
-/** Modal asking for a name; resolves with the typed text, or null when dismissed. */
+let openNameDialog = null;
+
+/**
+ * Modal asking for a name; resolves with the typed text, or null when dismissed.
+ * One dialog at a time: opening it moves focus, which can make other code ask again before the
+ * first call has returned, so the pending promise is stored before anything touches the DOM.
+ */
 export function askNameDialog(initial = '') {
-  return new Promise((resolve) => {
-    const dlg = document.createElement('dialog');
-    dlg.className = 'name';
-    dlg.innerHTML = '<form><h3>Adınız nedir?</h3><p class="muted">Yorumlarda ve değişikliklerde bu isim görünür.</p>'
-      + `<input name="n" maxlength="${NAME_MAX}" autocomplete="given-name" aria-label="Adınız" required>`
-      + '<div class="row"><button type="submit" class="cmt-send">Devam</button></div></form>';
-    const input = dlg.querySelector('input');
-    input.value = initial;
-    let settled = false;
-    const done = (value) => {
-      if (settled) return;
-      settled = true;
-      dlg.close();
-      dlg.remove();
-      resolve(value);
-    };
-    dlg.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); done(input.value); });
-    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
-    dlg.addEventListener('click', (e) => { if (e.target === dlg) done(null); });
-    document.body.append(dlg);
-    dlg.showModal();
-    input.focus();
-  });
+  if (openNameDialog) return openNameDialog;
+  let resolveName;
+  openNameDialog = new Promise((resolve) => { resolveName = resolve; });
+
+  const dlg = document.createElement('dialog');
+  dlg.className = 'name';
+  dlg.innerHTML = '<form><h3>Adınız nedir?</h3><p class="muted">Yorumlarda ve değişikliklerde bu isim görünür.</p>'
+    + `<input name="n" maxlength="${NAME_MAX}" autocomplete="given-name" aria-label="Adınız" required>`
+    + '<div class="row"><button type="submit" class="cmt-send">Devam</button></div></form>';
+  const input = dlg.querySelector('input');
+  input.value = initial;
+  let settled = false;
+  const done = (value) => {
+    if (settled) return;
+    settled = true;
+    openNameDialog = null;
+    dlg.close();
+    dlg.remove();
+    resolveName(value);
+  };
+  dlg.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); done(input.value); });
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) done(null); });
+  const pending = openNameDialog;
+  document.body.append(dlg);
+  dlg.showModal();
+  input.focus();
+  return pending;
 }
 
 /** "Son değiştiren: Ali · 5 dk önce" under each answered question (shared plans only). */

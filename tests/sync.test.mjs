@@ -260,6 +260,67 @@ test('a failed addComment rejects and leaves the comments unchanged', async () =
   assert.deepEqual(sync.getState().comments, []);
 });
 
+test('pendingIds lists the questions with unsent values', async () => {
+  const gate = deferred();
+  const { sync } = setup({ answerSet: () => gate.promise });
+  assert.deepEqual(sync.getState().pendingIds, []);
+  sync.setAnswer('disney', 'two', 'Ali');
+  sync.setAnswer('note', 'merhaba', 'Ali');
+  assert.deepEqual([...sync.getState().pendingIds].sort(), ['disney', 'note']);
+  gate.resolve('2026-10-21T10:00:05Z');
+  await settle();
+  assert.deepEqual(sync.getState().pendingIds, []);
+});
+
+test('a rejected write is reported per question until the next attempt', async () => {
+  let reject = true;
+  const { sync } = setup({
+    answerSet: () => {
+      if (reject) throw new ApiError('too long', { status: 413, code: 'too_large' });
+      return '2026-10-21T10:00:05Z';
+    },
+  });
+  assert.deepEqual(sync.getState().rejected, {});
+  sync.setAnswer('note', 'x'.repeat(10), 'Ali');
+  await settle();
+  assert.deepEqual(sync.getState().rejected, { note: 'Metin çok uzun.' });
+  reject = false;
+  sync.setAnswer('note', 'kısa', 'Ali');
+  assert.deepEqual(sync.getState().rejected, {}, 'cleared as soon as a new value is set');
+  await settle();
+  assert.deepEqual(sync.getState().rejected, {});
+  assert.equal(sync.getState().info.note.by, 'Ali');
+});
+
+test('kick retries a failed write at once, cancels the scheduled retry and polls', async () => {
+  let fail = true;
+  const { sync, timers, calls } = setup({
+    answerSet: () => { if (fail) throw netError(); return '2026-10-21T10:00:05Z'; },
+  });
+  sync.setAnswer('disney', 'two', 'Ali');
+  await settle();
+  assert.deepEqual(timers.list().map((t) => t.ms), [2000]);
+  fail = false;
+  sync.kick();
+  await settle();
+  assert.equal(sync.getState().pendingCount, 0);
+  assert.equal(sync.getState().status, 'live');
+  assert.deepEqual(timers.list(), [], 'the old retry timer is gone');
+  assert.equal(calls.answerSet.length, 2);
+  assert.equal(calls.planGet.length, 1, 'kick also refreshes');
+});
+
+test('kick does nothing in local mode or on an invalid link', async () => {
+  const api = new Proxy({}, { get() { throw new Error('api must not be used'); } });
+  const local = createSync({ api, secret: null, storage: memStorage(), timers: manualTimers() });
+  local.kick();
+  const bad = setup({ planGet: () => null });
+  await bad.sync.refresh();
+  bad.sync.kick();
+  await settle();
+  assert.equal(bad.calls.planGet.length, 1);
+});
+
 test('subscribers are notified and can unsubscribe', async () => {
   const { sync } = setup();
   const seen = [];

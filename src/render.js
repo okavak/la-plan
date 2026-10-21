@@ -53,12 +53,12 @@ function question(data, q, num) {
     const rich = q.options.some((o) => o.img || o.time);
     h += `<div class="opts${rich ? '' : ' compact'}">${q.options.map((o) => option(data, q, o)).join('')}</div>`;
     if (q.text) {
-      h += `${textField(q.text.id, q.text.label)}<input type="text" id="t-${esc(q.text.id)}" data-text="${esc(q.text.id)}" placeholder="${esc(q.text.placeholder || '')}"><span class="saved" data-saved="${esc(q.text.id)}"></span></div>`;
+      h += `${textField(q.text.id, q.text.label)}<input type="text" id="t-${esc(q.text.id)}" data-text="${esc(q.text.id)}" maxlength="300" placeholder="${esc(q.text.placeholder || '')}"><span class="saved" data-saved="${esc(q.text.id)}"></span></div>`;
     }
   } else if (q.type === 'number') {
     h += `${textField(q.id, 'Boy (cm)')}<input type="number" inputmode="numeric" min="90" max="170" id="t-${esc(q.id)}" data-text="${esc(q.id)}" placeholder="${esc(q.placeholder || '')}"><span class="saved" data-saved="${esc(q.id)}"></span></div>`;
   } else if (q.type === 'text') {
-    h += `${textField(q.id, 'Notunuz', ' class="muted"')}<textarea id="t-${esc(q.id)}" data-text="${esc(q.id)}" placeholder="${esc(q.placeholder || '')}"></textarea><span class="saved" data-saved="${esc(q.id)}"></span></div>`;
+    h += `${textField(q.id, 'Notunuz', ' class="muted"')}<textarea id="t-${esc(q.id)}" data-text="${esc(q.id)}" maxlength="1000" placeholder="${esc(q.placeholder || '')}"></textarea><span class="saved" data-saved="${esc(q.id)}"></span></div>`;
   }
   h += `<div class="qfoot"><p class="qmeta" data-qmeta="${esc(q.id)}"></p>`;
   h += `<button type="button" class="cbtn" data-comments="q:${esc(q.id)}" aria-expanded="false">Yorum <span class="cnt" data-count="q:${esc(q.id)}"></span></button></div>`;

@@ -82,18 +82,59 @@ test('ping posts an empty object and resolves ok', async () => {
   assert.deepEqual(fetchImpl.calls[0].body, {});
 });
 
-test('status 401, 400, 413, 429 map to the ApiError codes', async () => {
-  const expected = { 401: 'invalid_key', 400: 'invalid', 413: 'too_large', 429: 'limit' };
-  for (const [status, code] of Object.entries(expected)) {
-    const { api } = setup({ status: Number(status), body: { message: `m${status}` } });
+test('our own error messages map to the ApiError codes', async () => {
+  const expected = [[401, 'invalid_key', 'invalid_key'], [400, 'invalid_argument', 'invalid'], [413, 'too_large', 'too_large'], [429, 'limit', 'limit']];
+  for (const [status, message, code] of expected) {
+    const { api } = setup({ status, body: { message } });
     await assert.rejects(api.answerSet('S', 'q', 'a', 'A'), (err) => {
       assert.ok(err instanceof ApiError);
       assert.equal(err.code, code);
-      assert.equal(err.status, Number(status));
-      assert.equal(err.message, `m${status}`);
+      assert.equal(err.status, status);
+      assert.equal(err.message, message);
       return true;
     });
   }
+});
+
+test('gateway errors without our message are transient server errors, never "invalid link" or "cap reached"', async () => {
+  // A paused project, a rate-limited gateway or a bad API key must not drop unsent writes.
+  for (const [status, message] of [[401, 'Invalid API key'], [429, 'Too many requests'], [540, 'Project paused'], [502, 'Bad gateway']]) {
+    const { api } = setup({ status, body: { message } });
+    await assert.rejects(api.answerSet('S', 'q', 'a', 'A'), (err) => err instanceof ApiError && err.code === 'server' && err.status === status, `${status} ${message}`);
+  }
+});
+
+test('an unknown 400 or 413 keeps its meaning', async () => {
+  const bad = setup({ status: 400, body: { message: 'invalid input syntax for type uuid' } });
+  await assert.rejects(bad.api.commentDelete('S', 'not-a-uuid'), (err) => err.code === 'invalid');
+  const big = setup({ status: 413, body: { message: 'Payload too large' } });
+  await assert.rejects(big.api.answerSet('S', 'q', 'a', 'A'), (err) => err.code === 'too_large');
+});
+
+test('a request that never answers is aborted and reported as a network error', async () => {
+  const hung = (url, init) => new Promise((resolve, reject) => { init.signal?.addEventListener('abort', () => reject(init.signal.reason)); });
+  const api = createApi({ url: URL_BASE, anonKey: ANON, fetchImpl: hung, timeoutMs: 30 });
+  const outcome = await Promise.race([
+    api.planGet('S').then(() => 'resolved', (e) => e),
+    new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+  ]);
+  assert.notEqual(outcome, 'hung', 'the request must time out instead of hanging');
+  assert.ok(outcome instanceof ApiError && outcome.code === 'network');
+});
+
+test('a body that stalls after the headers is also a network error', async () => {
+  const stalled = (url, init) => Promise.resolve({
+    ok: true,
+    status: 200,
+    text: () => new Promise((resolve, reject) => { init.signal?.addEventListener('abort', () => reject(init.signal.reason)); }),
+  });
+  const api = createApi({ url: URL_BASE, anonKey: ANON, fetchImpl: stalled, timeoutMs: 30 });
+  const outcome = await Promise.race([
+    api.planGet('S').then(() => 'resolved', (e) => e),
+    new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+  ]);
+  assert.notEqual(outcome, 'hung', 'a stalled body must time out instead of hanging');
+  assert.ok(outcome instanceof ApiError && outcome.code === 'network');
 });
 
 test('a thrown fetch maps to network', async () => {

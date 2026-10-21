@@ -60,6 +60,17 @@ test('text and number questions carry data-text', () => {
   assert.ok(html.includes(`data-text="${withText.text.id}"`));
 });
 
+test('free-text fields carry a maxlength that stays under the server limit', () => {
+  const html = renderSections(data);
+  const tagOf = (id) => new RegExp(`<(?:textarea|input)[^>]*data-text="${id}"[^>]*>`).exec(html)[0];
+  const note = questions.find((q) => q.type === 'text');
+  const withText = questions.find((q) => q.text);
+  for (const id of [note.id, withText.text.id]) {
+    const max = Number(/maxlength="(\d+)"/.exec(tagOf(id))?.[1]);
+    assert.ok(max > 0 && max <= 1000, `${id}: maxlength ${max}`);
+  }
+});
+
 test('radio options render as radios and check options as checkboxes', () => {
   const html = renderSections(data);
   const optionCount = (type) => questions.filter((q) => q.type === type).reduce((n, q) => n + q.options.length, 0);

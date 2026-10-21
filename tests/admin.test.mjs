@@ -22,7 +22,7 @@ test('newSecret returns 22 url-safe characters and never repeats', () => {
 test('lit doubles single quotes and keeps everything else', () => {
   assert.equal(lit("Ali's plan"), "'Ali''s plan'");
   assert.equal(lit("x'; drop table plans; --"), "'x''; drop table plans; --'");
-  assert.equal(lit('Şehir · 5–13 Mart'), "'Şehir · 5–13 Mart'");
+  assert.equal(lit('Şehir · A–B günü'), "'Şehir · A–B günü'");
   assert.equal(lit(null), 'null');
 });
 
@@ -31,7 +31,7 @@ test('planUrl puts the secret in the fragment', () => {
 });
 
 test('buildNewPlanSql stores only the hash and escapes title and subtitle', () => {
-  const sql = buildNewPlanSql('plan-a', "Ali's plan", "Şehir · 5–13 Mart", 'SECRET-VALUE-0123456789');
+  const sql = buildNewPlanSql('plan-a', "Ali's plan", "Şehir · A–B günü", 'SECRET-VALUE-0123456789');
   assert.ok(sql.includes(hashSecret('SECRET-VALUE-0123456789')));
   assert.ok(!sql.includes('SECRET-VALUE-0123456789'), 'the raw secret must never reach the database');
   assert.ok(sql.includes("'Ali''s plan'"));
