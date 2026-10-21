@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  hashSecret, newSecret, lit, planUrl, parseEnv,
+  hashSecret, newSecret, lit, planUrl, parseEnv, supabaseQueryArgs, buildKeepaliveSql,
   buildNewPlanSql, buildRotateSql, buildDeleteSql, buildSetDocSql,
 } from '../tools/admin.mjs';
 
@@ -59,6 +59,34 @@ test('buildSetDocSql embeds the json as an escaped literal', () => {
   assert.ok(sql.includes("O''Hare"));
   assert.match(sql, /::jsonb/);
   assert.match(sql, /on conflict \(plan_id\) do update/);
+});
+
+test('buildKeepaliveSql schedules a weekly self-call of plan_ping and replaces an older job', () => {
+  const sql = buildKeepaliveSql({ ref: 'abcdefghijklmnopqrst', anonKey: 'sb_publishable_AbC-123_x' });
+  assert.match(sql, /create extension if not exists pg_cron/);
+  assert.match(sql, /create extension if not exists pg_net/);
+  assert.match(sql, /cron\.unschedule\('la-plan-keepalive'\)/);
+  assert.match(sql, /cron\.schedule\('la-plan-keepalive', '0 6 \* \* 1'/);
+  assert.ok(sql.includes('https://abcdefghijklmnopqrst.supabase.co/rest/v1/rpc/plan_ping'));
+  assert.ok(sql.includes("'apikey', 'sb_publishable_AbC-123_x'"));
+  assert.match(buildKeepaliveSql({ ref: 'abcdefghijklmnopqrst', anonKey: 'k', schedule: '* * * * *' }), /cron\.schedule\('la-plan-keepalive', '\* \* \* \* \*'/);
+});
+
+test('buildKeepaliveSql refuses input that could break out of the SQL', () => {
+  for (const ref of ['', 'short', 'abcdefghijklmnopqrst; drop table plans', "abcdefghijklmnopqrs'"]) {
+    assert.throws(() => buildKeepaliveSql({ ref, anonKey: 'k' }), /ref/, ref);
+  }
+  for (const anonKey of ['', "k'; drop table plans; --", 'a b', '$job$']) {
+    assert.throws(() => buildKeepaliveSql({ ref: 'abcdefghijklmnopqrst', anonKey }), /key/, anonKey);
+  }
+  for (const schedule of ["0 6 * * 1'; drop", '', 'weekly']) {
+    assert.throws(() => buildKeepaliveSql({ ref: 'abcdefghijklmnopqrst', anonKey: 'k', schedule }), /schedule/, schedule);
+  }
+});
+
+test('supabaseQueryArgs targets the project through --linked, as the CLI requires', () => {
+  assert.deepEqual(supabaseQueryArgs('abc123', 'select 1'), ['db', 'query', '--linked', '--project-ref', 'abc123', 'select 1']);
+  assert.deepEqual(supabaseQueryArgs('abc123', "select 'x'"), ['db', 'query', '--linked', '--project-ref', 'abc123', "select 'x'"], 'the SQL is one argument, never split or quoted');
 });
 
 test('parseEnv reads KEY=VALUE lines and skips comments and blanks', () => {

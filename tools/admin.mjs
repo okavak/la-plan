@@ -5,6 +5,7 @@
 //   node tools/admin.mjs rotate-key <slug>
 //   node tools/admin.mjs delete-plan <slug>
 //   node tools/admin.mjs set-plan-doc <slug> <file.json>
+//   node tools/admin.mjs install-keepalive [cron-expression]   (default weekly, Monday 06:00 UTC)
 //   node tools/admin.mjs sql "<statement>"
 //
 // Settings come from ~/.config/la-plan/env (KEY=VALUE lines, mode 600):
@@ -69,12 +70,37 @@ export function buildSetDocSql(slug, doc) {
     + 'on conflict (plan_id) do update set doc = excluded.doc, updated_at = now()';
 }
 
-/** Runs SQL on the linked Supabase project through the CLI's Management API path. */
+/**
+ * Weekly self-call of plan_ping from inside the database (pg_cron + pg_net), so the free-tier project
+ * keeps seeing API traffic even when nobody opens the page. Only public values go into the job.
+ */
+export function buildKeepaliveSql({ ref, anonKey, schedule = '0 6 * * 1' }) {
+  if (!/^[a-z0-9]{20}$/.test(String(ref))) throw new Error('bad project ref');
+  if (!/^[A-Za-z0-9._-]{1,400}$/.test(String(anonKey))) throw new Error('bad anon key');
+  if (!/^[0-9*/,-]+( [0-9*/,-]+){4}$/.test(String(schedule))) throw new Error('bad schedule');
+  const call = `select net.http_get(url := 'https://${ref}.supabase.co/rest/v1/rpc/plan_ping', headers := jsonb_build_object('apikey', '${anonKey}'))`;
+  return [
+    'create extension if not exists pg_cron',
+    'create extension if not exists pg_net',
+    "select cron.unschedule('la-plan-keepalive') where exists (select 1 from cron.job where jobname = 'la-plan-keepalive')",
+    `select cron.schedule('la-plan-keepalive', '${schedule}', $job$${call}$job$)`,
+  ].join(';\n');
+}
+
+/** The CLI only accepts --project-ref together with --linked (the Management API path). */
+export const supabaseQueryArgs = (ref, sql) => ['db', 'query', '--linked', '--project-ref', ref, sql];
+
+/** Runs SQL on a Supabase project through the CLI's Management API path; throws on a CLI error. */
 export function supabaseRunner(ref) {
-  return (sql) => execFileSync('supabase', ['db', 'query', '--project-ref', ref, sql], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  return (sql) => {
+    const out = execFileSync('supabase', supabaseQueryArgs(ref, sql), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // The CLI reports SQL errors as a JSON error object with a zero exit code in some versions.
+    if (/^\s*\{"_tag":"Error"/.test(out)) throw new Error(out.trim());
+    return out;
+  };
 }
 
 export function createAdmin({ runSql }) {
@@ -93,6 +119,9 @@ export function createAdmin({ runSql }) {
     },
     setPlanDoc(slug, doc) {
       runSql(buildSetDocSql(slug, doc));
+    },
+    installKeepalive({ ref, anonKey, schedule }) {
+      runSql(buildKeepaliveSql({ ref, anonKey, schedule }));
     },
     sql(statement) {
       return runSql(statement);
@@ -113,6 +142,7 @@ function usage() {
     '  node tools/admin.mjs rotate-key <slug>',
     '  node tools/admin.mjs delete-plan <slug>',
     '  node tools/admin.mjs set-plan-doc <slug> <file.json>',
+    '  node tools/admin.mjs install-keepalive [cron-expression]',
     '  node tools/admin.mjs sql "<statement>"',
   ].join('\n'));
   process.exit(2);
@@ -149,6 +179,10 @@ function main(argv) {
       if (!args[0] || !args[1]) usage();
       admin.setPlanDoc(args[0], JSON.parse(readFileSync(args[1], 'utf8')));
       console.log(`plan document set for ${args[0]}`);
+      break;
+    case 'install-keepalive':
+      admin.installKeepalive({ ref: env.LA_PROJECT_REF, anonKey: env.LA_SUPABASE_ANON_KEY, schedule: args[0] });
+      console.log(`keep-alive job installed (${args[0] ?? '0 6 * * 1'})`);
       break;
     case 'sql':
       if (!args[0]) usage();

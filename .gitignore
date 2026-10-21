@@ -6,3 +6,4 @@ node_modules/
 .playwright-mcp/
 /*.png
 docs/superpowers/
+supabase/.temp/
