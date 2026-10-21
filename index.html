@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>LA tatil planı</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230B6B4B'/%3E%3Cpath d='M3 8.5l3.2 3L13 4.8' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@700;800;900&family=Overpass+Mono:wght@600;700&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <p class="muted" id="hero-sub" hidden></p>
+    <h1 id="hero-title">Tatil seçim rehberi</h1>
+    <p class="lede" id="hero-lede">Her seçeneğin ne olduğu, kime göre olduğu, ne kadar sürdüğü ve aileye maliyeti kartın üstünde yazıyor. Seçimleriniz otomatik kaydedilir; linki alan herkes görür ve değiştirir.</p>
+    <ol class="how">
+      <li><b>Kartlara dokunun</b><span>Yeşil çerçeve seçildi demek. Tekrar dokunursanız seçim kalkar.</span></li>
+      <li><b>"Birini seçin" ya da "beğendiklerinizi işaretleyin"</b><span>Her sorunun üstünde yazıyor. İşaretlemedikleriniz plana girmez.</span></li>
+      <li><b>Yorum bırakın</b><span>Her kartın altındaki Yorum düğmesiyle birbirinize not yazın. Değişiklikler birkaç saniyede herkese görünür.</span></li>
+    </ol>
+  </header>
+
+  <div class="banner" id="banner" role="status" hidden></div>
+
+  <div class="bar" role="status" aria-live="polite">
+    <div class="bar-row">
+      <span><b id="p-done">0</b>/<b id="p-total">0</b> soru cevaplandı</span>
+      <span class="days" id="p-days">Seçtikleriniz ≈ 0 gün (7 tam gününüz var)</span>
+      <span id="p-usd">Biletler ≈ $0</span>
+      <span class="sync" id="sync" data-mode="connecting">Bağlanıyor…</span>
+      <button type="button" class="who" id="whoami" hidden></button>
+      <a href="#ozet">Özete git</a>
+    </div>
+    <div class="progress" aria-hidden="true"><i id="p-bar"></i></div>
+    <nav class="jump" id="jump" aria-label="Bölümler"></nav>
+  </div>
+
+  <main id="root"></main>
+
+  <section class="sec summary" id="ozet" aria-labelledby="ozet-h">
+    <div class="sec-head">
+      <h2 id="ozet-h">Seçimler</h2>
+      <p>Seçimler otomatik kaydedilir; linke sahip herkes bu listeyi görür.</p>
+    </div>
+    <div class="q"><ul class="sum-list" id="sum-list"></ul></div>
+    <div class="final"><b>Bitti mi?</b><span id="final-text">Kararsız kaldığınız yerlere yorum bırakın. Hepiniz seçimleri bitirince plan bu seçimlere göre kurulur.</span></div>
+  </section>
+
+  <section class="sec" id="notlar" aria-labelledby="notlar-h" hidden>
+    <div class="sec-head">
+      <h2 id="notlar-h">Notlar</h2>
+      <p>Plan hakkında genel notlar ve sorular. Linke sahip herkes görür.</p>
+    </div>
+    <div class="q"><div class="thread" data-thread="general"></div></div>
+  </section>
+
+  <footer class="foot" id="credits"></footer>
+</div>
+<noscript><p style="padding:1rem">Bu sayfa JavaScript gerektirir.</p></noscript>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

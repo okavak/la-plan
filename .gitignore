@@ -1,0 +1,8 @@
+node_modules/
+.local/
+.env*
+.superpowers/
+.DS_Store
+.playwright-mcp/
+/*.png
+docs/superpowers/
